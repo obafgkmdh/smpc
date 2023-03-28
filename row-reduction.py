@@ -19,7 +19,7 @@ class Circuit:
 		labels = [None, None]
 		for lb in [0, 1]:
 			for rb in [0, 1]:
-				key = get_key(l.out.labels[lb ^ l.out.ptr], r.labels[rb ^ r.out.ptr])
+				key = get_key(l.out.labels[lb ^ l.out.ptr], r.out.labels[rb ^ r.out.ptr])
 				if lb == 0 and rb == 0:
 					# initialize labels with opposing pointer bits
 					labels[bits[l.out.ptr << 1 ^ r.out.ptr]] = key
