@@ -1,17 +1,12 @@
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
 from Crypto.Util.number import long_to_bytes, bytes_to_long
 from hashlib import sha256
 from secrets import randbits
 
 BITS = 64
 
-def encrypt(k1, k2, m):
-	cipher = AES.new(sha256(long_to_bytes(k1)+long_to_bytes(k2)).digest(), AES.MODE_CBC)
-	return cipher.iv + cipher.encrypt(pad(long_to_bytes(m), 16))
-def decrypt(k1, k2, c):
-	cipher = AES.new(sha256(long_to_bytes(k1)+long_to_bytes(k2)).digest(), AES.MODE_CBC, iv=c[:16])
-	return bytes_to_long(unpad(cipher.decrypt(c[16:]), 16))
+def get_key(k1, k2):
+	key = sha256(long_to_bytes(k1)+long_to_bytes(k2)).digest()
+	return bytes_to_long(key) % (1 << (BITS + 1))
 
 class Circuit:
 	def __init__(self, l, r, bits, conjunction):
@@ -19,15 +14,21 @@ class Circuit:
 		self.r = r
 		self.conjunction = conjunction
 		
-		# create output wire
-		self.out = Wire()
-		
 		# create garbled table
 		table = []
+		labels = [None, None]
 		for lb in [0, 1]:
 			for rb in [0, 1]:
-				out_label = self.out.labels[bits[(lb ^ l.out.ptr) << 1 ^ (rb ^ r.out.ptr)]]
-				table.append(encrypt(l.out.labels[lb ^ l.out.ptr], r.labels[rb ^ r.out.ptr], out_label))
+				key = get_key(l.out.labels[lb ^ l.out.ptr], r.labels[rb ^ r.out.ptr])
+				if lb == 0 and rb == 0:
+					# initialize labels with opposing pointer bits
+					labels[bits[l.out.ptr << 1 ^ r.out.ptr]] = key
+					labels[bits[l.out.ptr << 1 ^ r.out.ptr] ^ 1] = randbits(BITS) << 1 ^ key ^ 1
+				else:
+					out_label = labels[bits[(lb ^ l.out.ptr) << 1 ^ (rb ^ r.out.ptr)]]
+					table.append(key ^ out_label)
+		
+		self.out = Wire(labels=labels)
 		self.table = table
 	
 	def __and__(self, other):
@@ -40,7 +41,7 @@ class Circuit:
 		return Circuit(self, other, [0, 1, 1, 0], "^")	
 	
 	def __repr__(self):
-		return f"({self.left} {self.conjunction} {self.right})"
+		return f"({self.l} {self.conjunction} {self.r})"
 	
 	def _evaluate(self, values):
 		# get label corresponding to a circuit evaluation
@@ -52,7 +53,7 @@ class Circuit:
 		ptr_r = right & 1
 		
 		# decrypt corresponding row
-		return decrypt(left, right, self.table[ptr_l << 1 ^ ptr_r])
+		return get_key(left, right) ^ ([0] + self.table)[ptr_l << 1 ^ ptr_r]
 	
 	def evaluate(self, values):
 		# Evaluator evaluates the circuit to get an output label
